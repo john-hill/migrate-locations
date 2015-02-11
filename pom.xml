@@ -8,7 +8,7 @@
 		<dependency>
 			<groupId>org.sagebionetworks</groupId>
 			<artifactId>synapseJavaClient</artifactId>
-			<version>develop-SNAPSHOT</version>
+			<version>77.0-2-g8e05355</version>
 		</dependency>
 		<dependency>
 			<groupId>net.sf.opencsv</groupId>
@@ -16,4 +16,47 @@
 			<version>2.0</version>
 		</dependency>
 	</dependencies>
+
+	<repositories>
+		<repository>
+			<id>sagebionetworks-releases-local</id>
+			<name>sagebionetworks-releases-local</name>
+			<url>http://sagebionetworks.artifactoryonline.com/sagebionetworks/libs-releases-local
+			</url>
+		</repository>
+		<repository>
+			<id>sagebionetworks-ext</id>
+			<name>sagebionetworks-releases-ext</name>
+			<url>http://sagebionetworks.artifactoryonline.com/sagebionetworks/ext-releases-local
+			</url>
+		</repository>
+		<repository>
+			<id>mvn-gae-plugin-repo</id>
+			<url>http://maven-gae-plugin.googlecode.com/svn/repository/</url>
+		</repository>
+		<repository>
+			<id>maven-central-rep-1</id>
+			<url>http://repo1.maven.org/maven2/</url>
+		</repository>
+		<repository>
+			<id>sun-maven-repository</id>
+			<url>http://download.java.net/maven/2/</url>
+		</repository>
+		<repository>
+			<id>apache-repo-releases</id>
+			<url>https://repository.apache.org/content/repositories/releases/
+			</url>
+		</repository>
+
+		<repository>
+			<id>central</id>
+			<name>Atlassian Public Repository</name>
+			<layout>default</layout>
+			<url>https://maven.atlassian.com/content/repositories/atlassian-public
+			</url>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+		</repository>
+	</repositories>
 </project>
