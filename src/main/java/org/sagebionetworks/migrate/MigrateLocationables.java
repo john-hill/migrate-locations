@@ -5,18 +5,37 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
+import java.util.List;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.sagebionetworks.client.SynapseClient;
 import org.sagebionetworks.client.exceptions.SynapseException;
-import org.sagebionetworks.repo.model.Entity;
+import org.sagebionetworks.client.exceptions.SynapseResultNotReadyException;
+import org.sagebionetworks.repo.model.AsyncLocationableTypeConversionRequest;
+import org.sagebionetworks.repo.model.AsyncLocationableTypeConversionResults;
+import org.sagebionetworks.repo.model.LocationableTypeConversionResult;
+import org.sagebionetworks.repo.model.asynch.AsynchJobState;
+import org.sagebionetworks.repo.model.asynch.AsynchronousJobStatus;
+import org.sagebionetworks.tool.progress.AggregateProgress;
+import org.sagebionetworks.tool.progress.BasicProgress;
+import org.sagebionetworks.util.Pair;
 
 import au.com.bytecode.opencsv.CSVWriter;
 
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+
 public class MigrateLocationables {
+	
+	/**
+	 * Limit the total of entities per run.
+	 * Set to infinity for all.
+	 */
+	private static final long MAX_ENTITES_PER_RUN = 1;
 	
 	private static final int BATCH_SIZE = 1000;
 	private static final String NEW_TYPE = "new_type";
@@ -45,47 +64,153 @@ public class MigrateLocationables {
 		LinkedHashSet<String> locationables = getAllLocationableIds();
 		// Migrate each and save the results to a temp file.
 		File temp = File.createTempFile("LocationMigration", ".csv");
+		System.out.println("Writting results to: "+temp.getAbsolutePath());
+		// break it into batches.
+		Iterable<List<String>> batches = Iterables.partition(locationables, BATCH_SIZE);
 		OutputStream fos = new FileOutputStream(temp);
 		try{
 			CSVWriter writer = new CSVWriter(new OutputStreamWriter(fos, "UTF-8"));
 			writer.writeNext(RESULT_HEADER);
-			// Write each
-			int count = 1;
-			for(String id: locationables){
-				System.out.println("Migrating "+count+"/"+locationables.size());
-				translateLocation(id, writer);
-				count++;
+			// Start and wait for each batch
+			BasicProgress progress = new BasicProgress();
+			progress.setCurrent(0);
+			progress.setTotal(locationables.size());
+			for(List<String> batch: batches){
+				startAndWaitForJob(batch, writer, progress);
 			}
 			writer.flush();
+			progress.setDone();
+			System.out.println(progress.getCurrentStatus().toString());
 		}finally{
 			fos.close();
 		}
 		System.out.println("Results file: "+temp.getAbsolutePath());
 	}
-	
 	/**
-	 * Translate a single entity.
-	 * @param id
+	 * Start a job and wait for it to finish.
+	 * @param batch
 	 * @param writer
+	 * @param progress
+	 * @throws SynapseException
+	 * @throws IOException
+	 * @throws InterruptedException
+	 */
+	private void startAndWaitForJob(List<String> batch, CSVWriter writer, BasicProgress progress) throws SynapseException, IOException, InterruptedException{
+		AsyncLocationableTypeConversionRequest request = new AsyncLocationableTypeConversionRequest();
+		request.setLocationableIdsToConvert(batch);
+		long startProgress = progress.getCurrent();
+		String jobId = synapse.startLocationableTypeConvertJob(request);
+		// Wait for the job
+		while(true){
+			try {
+				AsyncLocationableTypeConversionResults results = synapse.getLocationableTypeConverJobResults(jobId);
+				writeResults(results.getResults(), writer);
+				break;
+			} catch(SynapseResultNotReadyException e){
+				AsynchronousJobStatus status = e.getJobStatus();
+				if(AsynchJobState.FAILED.equals(status.getJobState())){
+					System.out.println("Job failed: "+jobId+" message: "+status.getErrorMessage());
+					System.out.println("Job failed: "+jobId+" details: "+status.getErrorDetails());
+					break;
+				}
+				if(status.getProgressCurrent() != null){
+					progress.setCurrent(startProgress+status.getProgressCurrent());
+				}
+			} catch (SynapseException e) {
+				// Something else went wrong.
+				e.printStackTrace();
+				break;
+			}
+			System.out.println(progress.getCurrentStatus().toString());
+			Thread.sleep(1000);
+		}
+		// Update the progress when done.
+		progress.setCurrent(startProgress+batch.size());
+	}
+
+	/**
+	 * Wait for each job and record successes.
+	 * @param jobIds
+	 * @param writer
+	 * @throws InterruptedException
 	 * @throws IOException 
 	 */
-	private void translateLocation(String id, CSVWriter writer) throws IOException{
-		String[] results = new String[RESULT_HEADER.length];
-		set(results, ENTITY_ID, id);
-		try{
-			Entity e = synapse.getEntityById(id);
-			set(results, ORIGINAL_TYPE, e.getClass().getName());
-			set(results, CREATED_BY, e.getCreatedBy());
-			// convert
-			e = synapse.convertLocationableEntity(e);
-			set(results, NEW_TYPE, e.getClass().getName());
-			set(results, SUCCESS, Boolean.TRUE.toString());
-		}catch(Exception e){
-			set(results, SUCCESS, Boolean.FALSE.toString());
-			set(results, ERROR, e.getMessage());
+	private void waitForAllJobs(Iterator<Pair<String, BasicProgress>> jobIds, CSVWriter writer) throws InterruptedException, IOException {
+		while(jobIds.hasNext()){
+			// Is this job done
+			Pair<String, BasicProgress> pair = jobIds.next();
+			String jobId = pair.getFirst();
+			BasicProgress progress = pair.getSecond();
+			try{
+				AsyncLocationableTypeConversionResults results = synapse.getLocationableTypeConverJobResults(jobId);
+				writeResults(results.getResults(), writer);
+				// Done with this job.
+				progress.setDone();
+				jobIds.remove();
+			}catch(SynapseResultNotReadyException e){
+				AsynchronousJobStatus status = e.getJobStatus();
+				if(AsynchJobState.FAILED.equals(status.getJobState())){
+					System.out.println("Job failed: "+jobId+" message: "+status.getErrorMessage());
+					System.out.println("Job failed: "+jobId+" details: "+status.getErrorDetails());
+					jobIds.remove();
+				}else{
+					if(status.getProgressCurrent() != null){
+						progress.setCurrent(status.getProgressCurrent());
+					}
+					if(status.getProgressTotal() != null){
+						progress.setTotal(status.getProgressTotal());
+					}
+					progress.setMessage(status.getProgressMessage());
+				}
+			} catch (SynapseException e) {
+				// Something else went wrong.
+				e.printStackTrace();
+			}
+			// Sleep between each check
+			Thread.sleep(100);
 		}
-		writer.writeNext(results);
-		writer.flush();
+	}
+	
+	/**
+	 * Write all of the resutls to the CSV
+	 * @param results
+	 * @param writer
+	 * @throws IOException
+	 */
+	private void writeResults(List<LocationableTypeConversionResult> results, CSVWriter writer) throws IOException{
+		String[] array = new String[RESULT_HEADER.length];
+		for(LocationableTypeConversionResult result: results){
+			set(array, ENTITY_ID, result.getEntityId());
+			set(array, SUCCESS, result.getSuccess().toString());
+			set(array, ORIGINAL_TYPE, result.getOriginalType());
+			set(array, NEW_TYPE, result.getNewType());
+			set(array, CREATED_BY, result.getCreatedBy());
+			set(array, ERROR, result.getErrorMessage());
+			writer.flush();
+		}
+	}
+
+
+	/**
+	 * Start all of the jobs.
+	 * @param locationables
+	 * @return
+	 * @throws SynapseException
+	 */
+	private List<Pair<String, BasicProgress>> startAllJobs(LinkedHashSet<String> locationables, AggregateProgress aggProgress)	throws SynapseException {
+		List<Pair<String, BasicProgress>> jobIds = Lists.newLinkedList();
+		Iterable<List<String>>batches = Iterables.partition(locationables, BATCH_SIZE);
+		for(List<String> batch: batches){
+			// Submit as a batch
+			AsyncLocationableTypeConversionRequest request = new AsyncLocationableTypeConversionRequest();
+			request.setLocationableIdsToConvert(batch);
+			String jobId = synapse.startLocationableTypeConvertJob(request);
+			BasicProgress progress = new BasicProgress();
+			aggProgress.addProgresss(progress);
+			jobIds.add(Pair.create(jobId, progress));
+			System.out.println("Started job: "+jobId);
+		}
+		return jobIds;
 	}
 	
 	/**
@@ -125,6 +250,8 @@ public class MigrateLocationables {
 		long offset = 1;
 		LinkedHashSet<String> set = new LinkedHashSet<String>();
 		System.out.println("Gathering locationable ids...");
+		BasicProgress progress = new BasicProgress();
+		progress.setMessage("Gathering locationable IDs");
 		// First find all locationables
 		do{
 			String query = "select id from locationable limit "+limit+" offset "+offset;
@@ -138,9 +265,17 @@ public class MigrateLocationables {
 			}
 			// next page
 			offset = offset+limit;
-			System.out.println("Found "+set.size()+"/"+totalNumber);
+			progress.setCurrent(set.size());
+			progress.setTotal(totalNumber);
+			System.out.println(progress.getCurrentStatus().toStringHours());
+			if(set.size() > MAX_ENTITES_PER_RUN){
+				break;
+			}
 		}while(set.size() < totalNumber);
 		System.out.println("Found: "+set.size()+" Locationables");
+		progress.setDone();
+		progress.setMessage("Found: "+set.size()+" Locationables");
+		System.out.println(progress.getCurrentStatus().toStringHours());
 		return set;
 	}
 
