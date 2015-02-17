@@ -34,7 +34,7 @@ public class StartMigrationJobs {
 		this.synapse = client;
 		LinkedHashSet<String> locationables = getAllLocationableIds(queryString);
 		
-		File temp = File.createTempFile("LocationMigration", ".csv");
+		File temp = File.createTempFile("LocationMigrationJobs", ".csv");
 		System.out.println("Writting results to: "+temp.getAbsolutePath());
 		// break each job into a batch.
 		Iterable<List<String>> batches = Iterables.partition(locationables, BATCH_SIZE);

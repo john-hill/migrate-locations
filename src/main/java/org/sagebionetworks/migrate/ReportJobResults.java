@@ -5,7 +5,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -50,7 +49,7 @@ public class ReportJobResults {
 		
 		LinkedHashSet<String> jobIds = readJobIds(jobFile);
 		
-		File temp = File.createTempFile("LocationMigration", ".csv");
+		File temp = File.createTempFile("LocationMigrationResults", ".csv");
 		System.out.println("Writting results to: "+temp.getAbsolutePath());
 		// Get the results for each job
 		CSVWriter writer = new CSVWriter(new OutputStreamWriter(new FileOutputStream(temp), "UTF-8"));
