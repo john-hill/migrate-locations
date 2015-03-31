@@ -26,7 +26,7 @@ import com.google.common.collect.Iterables;
  */
 public class StartMigrationJobs {
 	
-	private static final long MAX_ENTITES_PER_RUN = 5000;
+	private static final long MAX_ENTITES_PER_RUN = Long.MAX_VALUE;
 	private static final int BATCH_SIZE = 1000;
 	SynapseClient synapse;
 	

@@ -8,7 +8,7 @@
 		<dependency>
 			<groupId>org.sagebionetworks</groupId>
 			<artifactId>synapseJavaClient</artifactId>
-			<version>77.0-18-g6e9361b</version>
+			<version>2015-03-31-1680-4dd83b7</version>
 		</dependency>
 		<dependency>
 			<groupId>net.sf.opencsv</groupId>
